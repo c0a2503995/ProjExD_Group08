@@ -33,6 +33,7 @@ Level tiles (text grid, every row must be 20 characters, 13 rows)
 import math
 import sys
 import os
+from matplotlib.pyplot import box
 import pygame
 
 # ----------------------------------------------------------------- settings
@@ -200,11 +201,20 @@ def tile_box(tx, ty):
     return (tx * TILE, ty * TILE, (tx + 1) * TILE, (ty + 1) * TILE)
 
 
-def spike_box(tx, ty):
-    """Spikes only hurt in the lower half of their tile."""
-    return (tx * TILE + 8, ty * TILE + TILE / 2,
-            (tx + 1) * TILE - 8, (ty + 1) * TILE)
-
+def spike_box(tx, ty, gravity_dir=1):
+    """
+    Spikes hurt in the half of the tile that the player is being pulled toward.
+    gravity_dir =  1 → floor spikes (lower half)
+    gravity_dir = -1 → ceiling spikes (upper half)
+    """
+    if gravity_dir > 0:
+        # normal: lower half
+        return (tx * TILE + 8, ty * TILE + TILE / 2,
+                (tx + 1) * TILE - 8, (ty + 1) * TILE)
+    else:
+        # upside-down: upper half
+        return (tx * TILE + 8, ty * TILE,
+                (tx + 1) * TILE - 8, ty * TILE + TILE / 2)
 
 class Enemy:
     def __init__(self, x, y, dx, dy, walker):
@@ -414,7 +424,7 @@ class World:
             self.message = "You got the key!"
 
         for p in self.spikes | self.hidden:
-            if overlap(box, spike_box(*p)):
+            if overlap(box, spike_box(*p, self.gravity_dir)):
                 self.die("Spikes!" if p in self.spikes else
                          "Hidden spikes! Nobody warned you.")
         if tile in self.fake_exits:
@@ -484,9 +494,20 @@ class Game:
                 elif p in w.spikes or (revealed and p in w.hidden):
                     for i in range(3):
                         bx = rect.left + 4 + i * 11
-                        pygame.draw.polygon(self.screen, (200, 200, 210), [
-                            (bx, rect.bottom - 1), (bx + 6, rect.centery),
-                            (bx + 12, rect.bottom - 1)])
+                        if w.gravity_dir > 0:
+                            # normal floor spikes (pointing up)
+                            pygame.draw.polygon(self.screen, (200, 200, 210), [
+                                (bx, rect.bottom - 1),
+                                (bx + 6, rect.centery),
+                                (bx + 12, rect.bottom - 1)
+                            ])
+                        else:
+                            # ceiling spikes (pointing down)
+                            pygame.draw.polygon(self.screen, (200, 200, 210), [
+                                (bx, rect.top + 1),
+                                (bx + 6, rect.centery),
+                                (bx + 12, rect.top + 1)
+                            ])
 
     def draw_world(self):
         ox = int((self.shake % 4 - 2) * 2) if self.shake else 0
