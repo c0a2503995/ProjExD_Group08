@@ -154,17 +154,17 @@ LEVELS = [
             "hint": "Climb up, grab the key, then unlock the door on the right.",
             "grid": [
             "####################",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#P................E#",
-            "####################",
+            "#P.......#...K.....#",
+            "#####.S..#..#####..#",
+            "#.....####..#...D..#",
+            "#..V........#...####",
+            "#######..#MM#......#",
+            "#........####..X...#",
+            "#..#####.####.###F##",
+            "#....H.#......#...E#",
+            "######.########.####",
+            "#..............G...#",
+            "####MMMMMMMMMM######",
             "####################",
             ],
             },
@@ -237,6 +237,7 @@ class World:
         self.walls, self.fake_walls, self.doors = set(), set(), set()
         self.keys, self.spikes, self.hidden = set(), set(), set()
         self.fake_exits = set()
+        self.slimes = set()     #stage5追加機能
         self.exit = None
         self.enemies = []
         self.px = self.py = TILE * 1.5
@@ -246,6 +247,8 @@ class World:
                 cx, cy = x * TILE + TILE / 2, y * TILE + TILE / 2
                 if ch == "#":
                     self.walls.add(p)
+                elif ch == "M":      #stage5追加機能
+                    self.slimes.add(p)
                 elif ch == "F":
                     self.fake_walls.add(p)
                 elif ch == "D":
@@ -294,6 +297,22 @@ class World:
     def player_box(self):
         h = PLAYER_SIZE / 2
         return (self.px - h, self.py - h, self.px + h, self.py + h)
+
+    #stage5追加機能
+    def check_slime_collision(self, box: tuple[float, float, float, float]) -> bool:
+        """
+        プレイヤーの判定ボックスがスライム床(M)と接触しているか判定する。
+
+        :param box: プレイヤーの矩形座標 (left, top, right, bottom)
+        :return: スライム床に接触している場合は True、それ以外は False
+        """
+        l, t, r, b = box
+        # プレイヤーが重なっているタイルの範囲をループ処理
+        for ty in range(math.floor(t / TILE), math.floor((b - 0.001) / TILE) + 1):
+            for tx in range(math.floor(l / TILE), math.floor((r - 0.001) / TILE) + 1):
+                if (tx, ty) in self.slimes:
+                    return True
+        return False
 
     # ---- input -----------------------------------------------------------
     def jump_pressed(self):
@@ -350,7 +369,14 @@ class World:
                 x, y = t
                 stack += [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
 
-    def update(self, dt, dirx):
+    # stage5担当:型ヒント・docstring追加
+    def update(self, dt: float, dirx: int) -> None:
+        """
+        毎フレームの物理演算、移動処理、スライム減速判定、状態更新を行う。
+
+        :param dt: 1フレームの経過時間（秒）
+        :param dirx: キーボードの左右入力値（-1: 左, 0: 静止, 1: 右）
+        """
         if self.dead or self.cleared:
             return
 
@@ -368,9 +394,18 @@ class World:
                 self._do_jump()
 
         # ---- horizontal, then vertical (with gravity)
+        #stage5追加機能
+        box = self.player_box()
+        in_slime: bool = self.check_slime_collision(box)
+
+        # スライム接触時は移動速度を通常の40%に減速
+        current_speed: float = MOVE_SPEED * 0.4 if in_slime else MOVE_SPEED
+
         if dirx:
             self.facing = dirx
-            self._move_axis(dirx * MOVE_SPEED * dt, 0)
+            self._move_axis(dirx * current_speed * dt, 0)   #MOVE_SPEED → current_speed
+
+
         self.vy = min(self.vy + GRAVITY * dt, MAX_FALL)
         dy = self.vy * dt
         self.on_ground = False
@@ -471,6 +506,17 @@ class Game:
                                      rect.inflate(-6, -2), border_radius=6)
                     t = self.small.render("EXIT", True, WHITE)
                     self.screen.blit(t, t.get_rect(center=c))
+
+                #stage5追加機能
+                elif p in w.slimes:
+                    # 緑色の液体床ベース
+                    s_rect = pygame.Rect(ox + x * TILE, oy + y * TILE + 10, TILE, TILE - 10)
+                    pygame.draw.rect(self.screen, (40, 160, 70), s_rect, border_radius=4)
+                    # 表面の気泡模様
+                    pygame.draw.circle(self.screen, (90, 220, 120), (ox + x * TILE + 10, oy + y * TILE + 16), 5)
+                    pygame.draw.circle(self.screen, (90, 220, 120), (ox + x * TILE + 26, oy + y * TILE + 20), 7)
+
+                
                 elif p in w.spikes or (revealed and p in w.hidden):
                     for i in range(3):
                         bx = rect.left + 4 + i * 11
