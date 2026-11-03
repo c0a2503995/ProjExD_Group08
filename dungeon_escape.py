@@ -10,14 +10,14 @@ jump with SPACE. Find the key, open the door, reach the EXIT. Trust nothing.
   - fake walls you can walk through
   - patrolling monsters
   - instant restart (R) and a mark left where you died
+  - Stage 2: SPACE flips gravity instead of jumping
 
 Run:  pip install pygame
       python dungeon_escape.py
 
 Controls
   LEFT / RIGHT (or A / D) : run
-  SPACE (or UP / W)       : jump. Tap = short hop, hold = high jump.
-                            Press again in mid-air for a double jump.
+  SPACE (or UP / W)       : jump (Stage 2 = flip gravity)
   R                       : restart the stage (after dying, or any time)
   ENTER                   : next stage (after clearing one)
   ESC                     : quit
@@ -87,26 +87,26 @@ LEVELS = [
             "#..................#",
             "#..................#",
             "#..................#",
-            "#P................E#",
+            "#...............P.E#",
             "####################",
             "####################",
         ],
     },
     {
-        "name": "Stage 2: Trust Nothing",
-        "hint": "That EXIT looks awfully close. Some walls aren't walls.",
+        "name": "Stage 2: Gravity Flip",
+        "hint": "SPACE no longer jumps... it flips gravity. Good luck.",
         "grid": [
             "####################",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#P................E#",
+            "#...F....HHHHHHD...#",
+            "#K..#..........D...#",
+            "#.G.#.....##...D...#",
+            "#####..........D...#",
+            "#..............D..E#",
+            "#..............#####",
+            "#..............D...#",
+            "#...V..........DG.X#",
+            "#.............######",
+            "#P.................#",
             "####################",
             "####################",
         ],
@@ -147,12 +147,12 @@ LEVELS = [
             "#P................E#",
             "####################",
             "####################",
-            ],
-        },
-        {
-            "name": "Stage 5: The Cellar",
-            "hint": "Climb up, grab the key, then unlock the door on the right.",
-            "grid": [
+        ],
+    },
+    {
+        "name": "Stage 5: The Cellar",
+        "hint": "Climb up, grab the key, then unlock the door on the right.",
+        "grid": [
             "####################",
             "#..................#",
             "#..................#",
@@ -166,12 +166,12 @@ LEVELS = [
             "#P................E#",
             "####################",
             "####################",
-            ],
-            },
-        {
-            "name": "Stage 6: The Cellar",
-            "hint": "Climb up, grab the key, then unlock the door on the right.",
-            "grid": [
+        ],
+    },
+    {
+        "name": "Stage 6: The Cellar",
+        "hint": "Climb up, grab the key, then unlock the door on the right.",
+        "grid": [
             "####################",
             "#..................#",
             "#..................#",
@@ -185,8 +185,8 @@ LEVELS = [
             "#P................E#",
             "####################",
             "####################",
-            ],
-            }
+        ],
+    },
 ]
 
 
@@ -276,6 +276,7 @@ class World:
         self.jump_buffer = 0.0
         self.jump_held = False
         self.facing = 1
+        self.gravity_dir = 1          # 1 = normal (down), -1 = upside down
         # game state
         self.has_key = False
         self.dead = None
@@ -302,15 +303,17 @@ class World:
 
     def jump_released(self):
         self.jump_held = False
-        if self.vy < 0:                      # let go early = shorter jump
+        # cut jump only when moving against current gravity
+        if (self.vy < 0 and self.gravity_dir > 0) or \
+           (self.vy > 0 and self.gravity_dir < 0):
             self.vy *= JUMP_CUT
 
     def _do_jump(self):
-        self.vy = -JUMP_SPEED
+        self.vy = -JUMP_SPEED * self.gravity_dir
         self.on_ground = False
         self.coyote = 0.0
         self.jump_buffer = 0.0
-        if not self.jump_held:               # tapped and released already
+        if not self.jump_held:
             self.vy *= JUMP_CUT
 
     # ---- movement --------------------------------------------------------
@@ -371,11 +374,18 @@ class World:
         if dirx:
             self.facing = dirx
             self._move_axis(dirx * MOVE_SPEED * dt, 0)
-        self.vy = min(self.vy + GRAVITY * dt, MAX_FALL)
+
+        # gravity respects direction
+        self.vy += GRAVITY * self.gravity_dir * dt
+        # clamp fall speed in both directions
+        self.vy = max(-MAX_FALL, min(MAX_FALL, self.vy))
+
         dy = self.vy * dt
         self.on_ground = False
         if self._move_axis(0, dy):
-            if dy > 0:
+            # landed on the surface we are being pulled toward
+            if (dy > 0 and self.gravity_dir > 0) or \
+               (dy < 0 and self.gravity_dir < 0):
                 self.on_ground = True
             self.vy = 0.0
 
@@ -493,22 +503,33 @@ class Game:
         l, t, r, b = self.world.player_box()
         body = pygame.Rect(int(ox + l), int(oy + t), PLAYER_SIZE, PLAYER_SIZE)
         pygame.draw.rect(self.screen, BLUE, body, border_radius=5)
+
+        # eyes (flip when gravity is inverted)
+        if self.world.gravity_dir > 0:
+            eye_y = body.y + 9
+        else:
+            eye_y = body.bottom - 9
+
         eye = 14 if self.world.facing > 0 else 4
         for s in (eye, eye + 6):
-            pygame.draw.circle(self.screen, WHITE, (body.x + s, body.y + 9), 3)
+            pygame.draw.circle(self.screen, WHITE, (body.x + s, eye_y), 3)
+
         if self.world.has_key:
-            pygame.draw.circle(self.screen, GOLD, (body.right, body.top), 5)
+            key_pos = (body.right, body.top) if self.world.gravity_dir > 0 \
+                      else (body.right, body.bottom)
+            pygame.draw.circle(self.screen, GOLD, key_pos, 5)
 
     def draw_hud(self):
         self.screen.blit(self.title.render(self.level["name"], True, GOLD), (12, 8))
+        grav = "DOWN" if self.world.gravity_dir > 0 else "UP"
         info = (f"Deaths: {self.deaths}   Time: {int(self.total_time)}s   "
-                f"Key: {'YES' if self.world.has_key else 'no'}")
+                f"Key: {'YES' if self.world.has_key else 'no'}   Gravity: {grav}")
         self.screen.blit(self.font.render(info, True, WHITE), (12, 36))
         y = HUD_H + ROWS * TILE + 6
         msg = self.world.dead or self.world.message
         col = RED if self.world.dead else GREEN
         self.screen.blit(self.font.render(msg, True, col), (12, y))
-        keys = "ARROWS move | SPACE jump (hold = higher, again in air = double) | R restart"
+        keys = "ARROWS move | SPACE jump/flip | R restart"
         self.screen.blit(self.small.render(keys, True, (140, 140, 170)), (12, y + 20))
 
     def draw_overlay(self, text, color, sub):
@@ -547,7 +568,13 @@ class Game:
         elif key == pygame.K_r:
             self.restart()
         elif key in self.JUMP_KEYS:
-            self.world.jump_pressed()
+            # Stage 2 (index 1): SPACE flips gravity instead of jumping
+            if self.level_idx == 1:
+                self.world.gravity_dir *= -1
+                self.world.message = "Gravity flipped!"
+                self.world.jump_buffer = 0.0   # cancel any buffered jump
+            else:
+                self.world.jump_pressed()
         elif key == pygame.K_RETURN and self.world.cleared:
             if self.level_idx + 1 < len(LEVELS):
                 self.load(self.level_idx + 1)
