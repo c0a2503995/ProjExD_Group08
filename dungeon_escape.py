@@ -607,7 +607,19 @@ class World:
 
 
 
-    def is_in_water(self, px, py):
+    def is_in_water(self, px:float, py:float) ->bool:
+
+        """
+        プレイヤーの座標が水タイルの中にあるかを判定する。
+
+        Args:
+            px (float): プレイヤーのX座標（ピクセル単位）
+            py (float): プレイヤーのY座標（ピクセル単位）
+
+        Returns:
+            bool: 水タイル内にいる場合はTrue、そうでない場合はFalse
+        """
+        
         tx = math.floor(px / TILE)   ### 【stage3】 ピクセル座標をタイル番号に変換
         ty = math.floor(py / TILE)
         return (tx, ty) in self.water_tiles   ###【stage3】 そのタイルが水タイルの集合に含まれていればTrue
@@ -726,7 +738,7 @@ class World:
 
 
 
-    def update(self, dt, dirx):
+    def update(self, dt:float, dirx:int):
 
         if self.dead or self.cleared:
 
