@@ -1,3 +1,4 @@
+
 """
 DUNGEON ESCAPE: I Wanna Be The Escapee
 --------------------------------------
@@ -31,6 +32,8 @@ Level tiles (text grid, every row must be 20 characters, 13 rows)
   H  HIDDEN spike (kills) F  fake wall (walkable, looks solid)
   G  monster walking left/right (turns at ledges and walls)
   V  flying monster moving up/down
+  W water  ### 【stage3】 水中タイル
+  ^ updraft  # stage6 上昇気流
 """
 """
   C  CHASER monster: sleeps until you come within CHASE_RANGE, then
@@ -52,6 +55,7 @@ import pygame
 
 # ----------------------------------------------------------------- settings
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 TILE = 40
 COLS, ROWS = 20, 13
 HUD_H = 60
@@ -69,6 +73,13 @@ MAX_FALL = 900
 MAX_AIR_JUMPS = 1         # 1 = double jump, 0 = single jump only
 COYOTE = 0.08             # seconds you can still jump after leaving a ledge
 JUMP_BUFFER = 0.10        # seconds a jump press is remembered before landing
+
+#### 【stage3】水中では通常時と異なる重力・移動速度などを使うための設定値
+WATER_GRAVITY = 180       ### 水中での落下加速度（通常のGRAVITYより小さい）
+WATER_SWIM_SPEED = -220   ### SPACEを押したときの上昇速度（マイナスは上方向）
+WATER_MOVE_SPEED = 100    ### 水中での左右移動速度（通常時より遅い）
+WATER_MAX_FALL = 120      ### 水中での最大下落速度（落下しすぎないように制限）
+WATER_DRAG = 0.985        ### 水中で毎フレーム速度を少しずつ減らす抵抗
 
 ENEMY_R = 12
 ENEMY_SPEED = 110
@@ -105,9 +116,9 @@ LEVELS = [
             "#.........V....#..##",   
             "#..................#",  
             "##..##.###.###.#####",  
-            "#..............C...#",   # 【追加】チェイサー
+            "#..................#",   # 【追加】チェイサー
             "#..###...##..#######",  
-            "#P.......G..D....DE#",   
+            "#P.......K..D.K..DE#",   
             "####################",
             "####################",
         ],
@@ -133,20 +144,20 @@ LEVELS = [
         ],
     },
     {
-        "name": "Stage 3: The Vault",
-        "hint": "Climb to the key. The door needs it. Everything else wants you dead.",
+        "name": "Stage 3: Water Temple Challenge",    ###【stage3】
+        "hint": "Swim up to get the key, cross the spikes carefully!",
         "grid": [
-            "####################",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#P................E#",
+            "####################",    ### 【追加】Kは鍵、Wは水、Vは水中を上下に動く敵
+            "KP.WWWWWWWWWWWWWWWK#",    ### 水中を泳いで上部の鍵を取り、トゲを避けて出口を目指す配置 (仮)
+            "####WWWWWWWWWWWWWWW#",
+            "#WWDWWWWWWSSWWWWSWW#",
+            "#WWW################",
+            "#WWW##WWWWWWSWWWWWW#",
+            "#WWWWWWWWWWWWWWWWWK#",
+            "#WWWWWWWWWWWWWWWWWW#",
+            "#WW##WWWWW#WWW##WW##",
+            "#WWWWSSSSSSSSSSSSSS#",
+            "#WWWWV..VVD..V..V.E#",
             "####################",
             "####################",
         ],
@@ -237,9 +248,11 @@ class Enemy:
         lead_x = nx + self.dx * ENEMY_R
         lead_y = ny + self.dy * ENEMY_R
         turn = world.solid_px(lead_x, lead_y)
+
         if self.walker and not turn:
             # turn around at ledges: no floor just below the leading edge
             turn = not world.solid_px(lead_x, self.y + ENEMY_R + 2)
+
         if turn:
             self.dx, self.dy = -self.dx, -self.dy
         else:
@@ -286,20 +299,26 @@ class World:
     def __init__(self, grid):
         self.walls, self.fake_walls, self.doors = set(), set(), set()
         self.keys, self.spikes, self.hidden = set(), set(), set()
+        self.fake_exits, self.water_tiles = set(), set()          ### 【stage3】水タイルの座標を保存する集合を用意
         self.fake_exits = set()
         self.slimes = set()     #stage5追加機能
         self.exit = None
         self.enemies = []
         self.wind_zones = set()  # stage6：上昇気流
         self.px = self.py = TILE * 1.5
+        self.in_water = False     ### 【stage3】プレイヤーが現在水中にいるかどうかを記録
+
         for y, row in enumerate(grid):
             for x, ch in enumerate(row):
                 p = (x, y)
                 cx, cy = x * TILE + TILE / 2, y * TILE + TILE / 2
+
                 if ch == "#":
                     self.walls.add(p)
                 elif ch == "M":      #stage5追加機能
                     self.slimes.add(p)
+                elif ch == "W":               ### 【stage3】マップ上のWを水タイルとして登録
+                    self.water_tiles.add(p)
                 elif ch == "F":
                     self.fake_walls.add(p)
                 elif ch == "D":
@@ -334,6 +353,7 @@ class World:
         self.jump_buffer = 0.0
         self.jump_held = False
         self.facing = 1
+
         # game state
         self.has_key = False
         self.dead = None
@@ -368,15 +388,35 @@ class World:
                 if (tx, ty) in self.slimes:
                     return True
         return False
+    def is_in_water(self, px: float, py: float) -> bool:
+        """
+        プレイヤーの座標が水タイルの中にあるかを判定する。
+
+        Args:
+            px (float): プレイヤーのX座標（ピクセル単位）
+            py (float): プレイヤーのY座標（ピクセル単位）
+
+        Returns:
+            bool: 水タイル内にいる場合はTrue、そうでない場合はFalse
+        """
+
+        tx = math.floor(px / TILE)   ### 【stage3】 ピクセル座標をタイル番号に変換
+        ty = math.floor(py / TILE)
+        return (tx, ty) in self.water_tiles   ###【stage3】 そのタイルが水タイルの集合に含まれていればTrue
 
     # ---- input -----------------------------------------------------------
     def jump_pressed(self):
         self.jump_held = True
-        self.jump_buffer = JUMP_BUFFER
+
+        if self.in_water:
+            self.vy = WATER_SWIM_SPEED       ### 【stage3】水中でSPACEを押した場合は、ジャンプではなく泳いで上昇
+        else:                                ### 【stage3】水中でなければ、元のジャンプ受付処理を行う ###
+            self.jump_buffer = JUMP_BUFFER
 
     def jump_released(self):
         self.jump_held = False
-        if self.vy < 0:                      # let go early = shorter jump
+
+        if not self.in_water and self.vy < 0:  ### 【stage3】水中ではジャンプの高さ調整を行わない ###
             self.vy *= JUMP_CUT
 
     def _do_jump(self):
@@ -384,6 +424,7 @@ class World:
         self.on_ground = False
         self.coyote = 0.0
         self.jump_buffer = 0.0
+
         if not self.jump_held:               # tapped and released already
             self.vy *= JUMP_CUT
 
@@ -395,19 +436,24 @@ class World:
         self.px += dx
         self.py += dy
         l, t, r, b = self.player_box()
+
         for ty in range(math.floor(t / TILE), math.floor((b - 0.001) / TILE) + 1):
             for tx in range(math.floor(l / TILE), math.floor((r - 0.001) / TILE) + 1):
                 if self.solid(tx, ty):
                     hit = True
+
                     if dx > 0:
                         self.px = tx * TILE - h
                     elif dx < 0:
                         self.px = (tx + 1) * TILE + h
+
                     if dy > 0:
                         self.py = ty * TILE - h
                     elif dy < 0:
                         self.py = (ty + 1) * TILE + h
+
                     l, t, r, b = self.player_box()
+
         return hit
 
     def die(self, reason):
@@ -417,8 +463,10 @@ class World:
     def _open_door(self, start):
         """Unlock a door and every door tile connected to it."""
         stack = [start]
+
         while stack:
             t = stack.pop()
+
             if t in self.doors:
                 self.doors.discard(t)
                 x, y = t
@@ -445,60 +493,89 @@ class World:
                 break
 
 
-    def update(self, dt: float, dirx: int) -> None:
-        """
-        毎フレームの物理演算、移動処理、スライム減速判定、状態更新を行う。
 
-        :param dt: 1フレームの経過時間（秒）
-        :param dirx: キーボードの左右入力値（-1: 左, 0: 静止, 1: 右）
-        """
+    def update(self, dt: float, dirx: int):
         if self.dead or self.cleared:
             return
 
-        # ---- jumping (coyote time, jump buffer, double jump)
-        self.coyote = max(0.0, self.coyote - dt)
-        self.jump_buffer = max(0.0, self.jump_buffer - dt)
-        if self.on_ground:
-            self.coyote = COYOTE
-            self.air_jumps = MAX_AIR_JUMPS
-        if self.jump_buffer > 0:
-            if self.on_ground or self.coyote > 0:
-                self._do_jump()
-            elif self.air_jumps > 0:
-                self.air_jumps -= 1
-                self._do_jump()
+        # プレイヤーが水中にいるか判定
+        self.in_water = self.is_in_water(self.px, self.py)
 
-        # ---- horizontal, then vertical (with gravity)
-        #stage5追加機能
+        # スライムとの接触判定
         box = self.player_box()
         in_slime: bool = self.check_slime_collision(box)
 
         # スライム接触時は移動速度を通常の40%に減速
         current_speed: float = MOVE_SPEED * 0.4 if in_slime else MOVE_SPEED
 
-        if dirx:
-            self.facing = dirx
-            self._move_axis(dirx * current_speed * dt, 0)   #MOVE_SPEED → current_speed
+        if self.in_water:
+            # 水中では通常のジャンプ補助機能を無効にする
+            self.coyote = 0.0
+            self.jump_buffer = 0.0
 
+            # 水中での左右移動
+            if dirx:
+                self.facing = dirx
+                self._move_axis(dirx * WATER_MOVE_SPEED * dt, 0)
 
-        self.vy = min(self.vy + GRAVITY * dt, MAX_FALL)
-        self._update_wind(dt)  # stage6：重力計算に風を適用する
-        dy = self.vy * dt
-        self.on_ground = False
-        if self._move_axis(0, dy):
-            if dy > 0:
-                self.on_ground = True
-            self.vy = 0.0
+            # 水中用の重力・落下速度
+            self.vy = min(self.vy + WATER_GRAVITY * dt, WATER_MAX_FALL)
+            self.vy *= WATER_DRAG
+            dy = self.vy * dt
+
+            self.on_ground = False
+
+            if self._move_axis(0, dy):
+                if dy > 0:
+                    self.on_ground = True
+                self.vy = 0.0
+
+        else:
+            # ---- jumping (coyote time, jump buffer, double jump)
+            self.coyote = max(0.0, self.coyote - dt)
+            self.jump_buffer = max(0.0, self.jump_buffer - dt)
+
+            if self.on_ground:
+                self.coyote = COYOTE
+                self.air_jumps = MAX_AIR_JUMPS
+
+            if self.jump_buffer > 0:
+                if self.on_ground or self.coyote > 0:
+                    self._do_jump()
+                elif self.air_jumps > 0:
+                    self.air_jumps -= 1
+                    self._do_jump()
+
+            # 通常時の左右移動（スライムの減速を反映）
+            if dirx:
+                self.facing = dirx
+                self._move_axis(dirx * current_speed * dt, 0)
+
+            # 通常時の重力処理（1回だけ実行）
+            self.vy = min(self.vy + GRAVITY * dt, MAX_FALL)
+
+            # 上昇気流による上昇処理
+            self._update_wind(dt)
+
+            dy = self.vy * dt
+            self.on_ground = False
+
+            if self._move_axis(0, dy):
+                if dy > 0:
+                    self.on_ground = True
+                self.vy = 0.0
 
         box = self.player_box()
 
         for e in self.enemies:
             e.update(dt, self)
+
             if e.hits(box):
                 self.die("A monster got you.")
 
         # ---- doors: touch with the key to unlock
         pad = (box[0] - 4, box[1] - 4, box[2] + 4, box[3] + 4)
+
         for d in list(self.doors):
             if d in self.doors and overlap(pad, tile_box(*d)):
                 if self.has_key:
@@ -509,6 +586,7 @@ class World:
                     self.message = "The door is locked. Find a key."
 
         tile = (math.floor(self.px / TILE), math.floor(self.py / TILE))
+
         if tile in self.keys:
             self.keys.discard(tile)
             self.has_key = True
@@ -518,10 +596,13 @@ class World:
             if overlap(box, spike_box(*p)):
                 self.die("Spikes!" if p in self.spikes else
                          "Hidden spikes! Nobody warned you.")
+
         if tile in self.fake_exits:
             self.die("That exit was fake!")
+
         if tile == self.exit:
             self.cleared = True
+
 
 
 # --------------------------------------------------------------------- game
@@ -556,32 +637,42 @@ class Game:
     def draw_tiles(self, ox, oy):
         w = self.world
         revealed = bool(w.dead)
+
         for y in range(ROWS):
             for x in range(COLS):
                 p = (x, y)
                 rect = pygame.Rect(ox + x * TILE, oy + y * TILE, TILE, TILE)
+
                 if p in w.walls or p in w.fake_walls:
                     pygame.draw.rect(self.screen, WALL_C, rect)
                     pygame.draw.rect(self.screen, WALL_EDGE, rect, 2)
+
                     if revealed and p in w.fake_walls:
                         pygame.draw.rect(self.screen, GREEN, rect, 2)
+
                     continue
+
                 pygame.draw.rect(self.screen,
                                  SKY_A if (x + y) % 2 else SKY_B, rect)
                 c = rect.center
+
                 if p in w.doors:
                     pygame.draw.rect(self.screen, (140, 90, 40), rect.inflate(-4, 0))
                     pygame.draw.circle(self.screen, GOLD, c, 6)
+
                 elif p in w.keys:
                     pygame.draw.circle(self.screen, GOLD, (c[0] - 6, c[1]), 7, 3)
                     pygame.draw.line(self.screen, GOLD, c, (c[0] + 12, c[1]), 3)
                     pygame.draw.line(self.screen, GOLD, (c[0] + 9, c[1]),
                                      (c[0] + 9, c[1] + 6), 3)
+
                 elif p == w.exit or p in w.fake_exits:
                     pygame.draw.rect(self.screen, (30, 120, 70),
                                      rect.inflate(-6, -2), border_radius=6)
                     t = self.small.render("EXIT", True, WHITE)
                     self.screen.blit(t, t.get_rect(center=c))
+
+        
 
                 #stage5追加機能
                 elif p in w.slimes:
@@ -599,6 +690,19 @@ class Game:
                         pygame.draw.polygon(self.screen, (200, 200, 210), [
                             (bx, rect.bottom - 1), (bx + 6, rect.centery),
                             (bx + 12, rect.bottom - 1)])
+
+        water_surface = pygame.Surface((TILE, TILE), pygame.SRCALPHA)  ### 【stage3：水の描画】半透明の青いタイル画像を作る
+        water_surface.fill((30, 140, 220, 110))
+
+        for (x, y) in w.water_tiles:  ### 【stage3】 登録されたすべての水タイルに半透明の青色を重ねる
+            rect = pygame.Rect(ox + x * TILE, oy + y * TILE, TILE, TILE)
+            self.screen.blit(water_surface, rect)
+
+            ### 【stage3】 水面の一番上のタイルに明るい線を引いて水面を表現
+            if (x, y - 1) not in w.water_tiles:
+                pygame.draw.line(self.screen, (180, 230, 255), rect.topleft, rect.topright, 3)
+
+        
 
     def _draw_wind_zones(self, ox: int, oy: int):  #stage6
         """
@@ -621,28 +725,39 @@ class Game:
                 cx = rect.centerx
                 pts = [(cx - 6, arrow_y + 4), (cx, arrow_y - 4), (cx + 6, arrow_y + 4)]
                 pygame.draw.lines(self.screen, (180, 240, 255), False, pts, 2)  # 矢印の描画
-
+                
     def draw_world(self):
         ox = int((self.shake % 4 - 2) * 2) if self.shake else 0
         oy = HUD_H
         self.draw_tiles(ox, oy)
         self._draw_wind_zones(ox, oy)  # stage6：風のエフェクトを表示
+
         for mx, my in self.markers[self.level_idx]:
             t = self.font.render("x", True, (170, 50, 50))
             self.screen.blit(t, t.get_rect(center=(ox + mx, oy + my)))
+
         for e in self.world.enemies:
             c = (int(ox + e.x), int(oy + e.y))
             pygame.draw.circle(self.screen, RED, c, ENEMY_R)
+
             for s in (-4, 4):
                 pygame.draw.circle(self.screen, WHITE, (c[0] + s, c[1] - 2), 3)
+
         l, t, r, b = self.world.player_box()
         body = pygame.Rect(int(ox + l), int(oy + t), PLAYER_SIZE, PLAYER_SIZE)
         pygame.draw.rect(self.screen, BLUE, body, border_radius=5)
         eye = 14 if self.world.facing > 0 else 4
+
         for s in (eye, eye + 6):
             pygame.draw.circle(self.screen, WHITE, (body.x + s, body.y + 9), 3)
+
         if self.world.has_key:
             pygame.draw.circle(self.screen, GOLD, (body.right, body.top), 5)
+
+        if self.world.in_water:  ### 【stage3】プレイヤーが水中にいる間、画面全体に薄い青色のフィルターを重ねる
+            filter_surf = pygame.Surface((SCREEN_W, ROWS * TILE), pygame.SRCALPHA)
+            filter_surf.fill((10, 50, 120, 35))
+            self.screen.blit(filter_surf, (0, HUD_H))
 
     def draw_hud(self):
         self.screen.blit(self.title.render(self.level["name"], True, GOLD), (12, 8))
@@ -671,8 +786,10 @@ class Game:
         self.draw_world()
         self.draw_hud()
         w = self.world
+
         if w.dead:
             self.draw_overlay("YOU DIED", RED, "Press R to try again")
+
         elif w.cleared:
             if self.level_idx + 1 < len(LEVELS):
                 self.draw_overlay("STAGE CLEAR!", GREEN, "Press ENTER for the next stage")
@@ -680,6 +797,7 @@ class Game:
                 self.draw_overlay("YOU ESCAPED!", GREEN,
                                   f"{self.deaths} deaths, {int(self.total_time)}s. "
                                   "ENTER to play again")
+
         pygame.display.flip()
 
     # ---- loop ------------------------------------------------------------
@@ -689,10 +807,13 @@ class Game:
         if key == pygame.K_ESCAPE:
             pygame.quit()
             sys.exit()
+
         elif key == pygame.K_r:
             self.restart()
+
         elif key in self.JUMP_KEYS:
             self.world.jump_pressed()
+
         elif key == pygame.K_RETURN and self.world.cleared:
             if self.level_idx + 1 < len(LEVELS):
                 self.load(self.level_idx + 1)
@@ -704,12 +825,15 @@ class Game:
     def run(self):
         while True:
             dt = min(self.clock.tick(FPS) / 1000.0, 1 / 30)
+
             for e in pygame.event.get():
                 if e.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
+
                 elif e.type == pygame.KEYDOWN:
                     self.handle_keydown(e.key)
+
                 elif e.type == pygame.KEYUP and e.key in self.JUMP_KEYS:
                     self.world.jump_released()
 
@@ -718,6 +842,7 @@ class Game:
 
             if not self.world.dead and not self.world.cleared:
                 self.total_time += dt
+
             self.world.update(dt, dirx)
 
             if self.world.dead and not self.death_counted:
@@ -726,8 +851,10 @@ class Game:
                 self.shake = 15
                 self.markers[self.level_idx].append(
                     (int(self.world.px), int(self.world.py)))
+
             if self.shake:
                 self.shake -= 1
+
             self.draw()
 
 
