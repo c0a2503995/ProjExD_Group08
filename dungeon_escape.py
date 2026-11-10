@@ -9,6 +9,8 @@ jump with SPACE. Find the key, open the door, reach the EXIT. Trust nothing.
   - fake exits that kill you
   - fake walls you can walk through
   - patrolling monsters
+  - CHASER monsters that wake up when you get close and hunt you (through walls)
+    ← 【追加】追従する敵(チェイサー)
   - instant restart (R) and a mark left where you died
 
 Run:  pip install pygame
@@ -30,6 +32,19 @@ Level tiles (text grid, every row must be 20 characters, 13 rows)
   G  monster walking left/right (turns at ledges and walls)
   V  flying monster moving up/down
 """
+"""
+  C  CHASER monster: sleeps until you come within CHASE_RANGE, then
+     follows you forever (slower than you, flies straight through walls)
+     ← 【追加】新しいタイル記号 C
+"""
+# =============================================================================
+# 【変更履歴】一番最初のコードから、次の箇所を追加・変更しました。
+#
+#   【追加】 CHASE_SPEED / CHASE_RANGE ... チェイサーの速度と起動距離
+#   【追加】 class Chaser              ... 壁を避けてプレイヤーを追う敵
+#   【追加】 World.__init__ の "C"     ... グリッドの C からチェイサーを生成
+#   ※ Stage 3 と描画処理は元のまま(チェイサー専用の描画は無し)
+# =============================================================================
 import math
 import sys
 import os
@@ -58,6 +73,10 @@ JUMP_BUFFER = 0.10        # seconds a jump press is remembered before landing
 ENEMY_R = 12
 ENEMY_SPEED = 110
 
+# 【追加】チェイサー(追従する敵)の設定
+CHASE_SPEED = 80          # px/s, much slower than MOVE_SPEED so you can outrun it
+CHASE_RANGE = 380         # px, the chaser wakes up when you get this close
+
 BG = (10, 10, 18)
 SKY_A = (26, 26, 40)
 SKY_B = (30, 30, 46)
@@ -74,27 +93,29 @@ BLUE = (80, 150, 255)
 # 2 tiles of gap, so keep ledges within that unless you want a double jump.
 LEVELS = [
     {
-        "name": "Stage 1: The Cellar",
+        "name": "Stage 1: The chaser",
         "hint": "Climb up, grab the key, then unlock the door on the right.",
+
         "grid": [
             "####################",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#P................E#",
+            "#..K...............#",
+            "#.................K#",  
+            "#...#.......#.....##",
+            "#......#...........#",  
+            "#.........V....#..##",   
+            "#..................#",  
+            "##..##.###.###.#####",  
+            "#..............C...#",   # 【追加】チェイサー
+            "#..###...##..#######",  
+            "#P.......G..D....DE#",   
             "####################",
             "####################",
         ],
     },
     {
         "name": "Stage 2: Trust Nothing",
-        "hint": "That EXIT looks awfully close. Some walls aren't walls.",
+
+        "hint": "A monster wakes up when you get close and hunts you. Keep moving, and watch the floor.",
         "grid": [
             "####################",
             "#..................#",
@@ -147,12 +168,12 @@ LEVELS = [
             "#P................E#",
             "####################",
             "####################",
-            ],
-        },
-        {
-            "name": "Stage 5: The Cellar",
-            "hint": "Climb up, grab the key, then unlock the door on the right.",
-            "grid": [
+        ],
+    },
+    {
+        "name": "Stage 5: The Cellar",
+        "hint": "Climb up, grab the key, then unlock the door on the right.",
+        "grid": [
             "####################",
             "#..................#",
             "#..................#",
@@ -166,12 +187,12 @@ LEVELS = [
             "#P................E#",
             "####################",
             "####################",
-            ],
-            },
-        {
-            "name": "Stage 6: The Cellar",
-            "hint": "Climb up, grab the key, then unlock the door on the right.",
-            "grid": [
+        ],
+    },
+    {
+        "name": "Stage 6: The Cellar",
+        "hint": "Climb up, grab the key, then unlock the door on the right.",
+        "grid": [
             "####################",
             "#..................#",
             "#..................#",
@@ -185,8 +206,8 @@ LEVELS = [
             "#P................E#",
             "####################",
             "####################",
-            ],
-            }
+        ],
+    },
 ]
 
 
@@ -230,6 +251,35 @@ class Enemy:
         return math.hypot(self.x - cx, self.y - cy) < ENEMY_R - 2
 
 
+# =============================================================================
+# 【追加】class Chaser ここから
+#   Enemy を継承した、プレイヤーを追いかける敵。
+#   ・近づくまで眠っている(awake=False)→ CHASE_RANGE 以内で起きる
+#   ・壁や扉をすり抜けて、プレイヤーに向かってまっすぐ飛んでくる
+#   ・速度は CHASE_SPEED(プレイヤーより遅い)
+# =============================================================================
+class Chaser(Enemy):
+    """プレイヤーが近づくと目覚め、その後ずっとプレイヤーを追いかけてくる飛行モンスター。
+    壁や扉を通り抜けて、プレイヤーに向かってまっすぐ飛んでくる。
+    移動速度はプレイヤーよりも遅い。"""
+
+    def __init__(self, x, y):
+        super().__init__(x, y, 0, 0, False)
+        self.awake = False
+
+    def update(self, dt, world):
+        dx = world.px - self.x
+        dy = world.py - self.y
+        dist = math.hypot(dx, dy)
+        if not self.awake and dist < CHASE_RANGE:
+            self.awake = True
+        if self.awake and dist > 1:
+            step = min(CHASE_SPEED * dt, dist)
+            self.x += dx / dist * step
+            self.y += dy / dist * step
+# 【追加】class Chaser ここまで
+
+
 class World:
     """One stage: tiles, player physics, monsters and all the rules."""
 
@@ -265,6 +315,8 @@ class World:
                         Enemy(cx, (y + 1) * TILE - ENEMY_R, 1, 0, True))
                 elif ch == "V":
                     self.enemies.append(Enemy(cx, cy, 0, 1, False))
+                elif ch == "C":      # 【追加】チェイサーを生成(グリッドの C)
+                    self.enemies.append(Chaser(cx, cy))
                 elif ch == "P":
                     self.px = cx
                     self.py = (y + 1) * TILE - PLAYER_SIZE / 2
