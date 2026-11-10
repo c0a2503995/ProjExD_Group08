@@ -12,14 +12,14 @@ jump with SPACE. Find the key, open the door, reach the EXIT. Trust nothing.
   - CHASER monsters that wake up when you get close and hunt you (through walls)
     ← 【追加】追従する敵(チェイサー)
   - instant restart (R) and a mark left where you died
+  - Stage 2: SPACE flips gravity instead of jumping
 
 Run:  pip install pygame
       python dungeon_escape.py
 
 Controls
   LEFT / RIGHT (or A / D) : run
-  SPACE (or UP / W)       : jump. Tap = short hop, hold = high jump.
-                            Press again in mid-air for a double jump.
+  SPACE (or UP / W)       : jump (Stage 2 = flip gravity)
   R                       : restart the stage (after dying, or any time)
   ENTER                   : next stage (after clearing one)
   ESC                     : quit
@@ -40,17 +40,20 @@ Level tiles (text grid, every row must be 20 characters, 13 rows)
      follows you forever (slower than you, flies straight through walls)
      ← 【追加】新しいタイル記号 C
 """
-# =============================================================================
-# 【変更履歴】一番最初のコードから、次の箇所を追加・変更しました。
-#
-#   【追加】 CHASE_SPEED / CHASE_RANGE ... チェイサーの速度と起動距離
-#   【追加】 class Chaser              ... 壁を避けてプレイヤーを追う敵
-#   【追加】 World.__init__ の "C"     ... グリッドの C からチェイサーを生成
-#   ※ Stage 3 と描画処理は元のまま(チェイサー専用の描画は無し)
-# =============================================================================
+"""
+ =============================================================================
+ 【変更履歴】一番最初のコードから、次の箇所を追加・変更しました。
+
+   【追加】 CHASE_SPEED / CHASE_RANGE ... チェイサーの速度と起動距離
+   【追加】 class Chaser              ... 壁を避けてプレイヤーを追う敵
+   【追加】 World.__init__ の "C"     ... グリッドの C からチェイサーを生成
+   ※ Stage 3 と描画処理は元のまま(チェイサー専用の描画は無し)
+=============================================================================
+"""
 import math
 import sys
 import os
+# from matplotlib.pyplot import box
 import pygame
 
 # ----------------------------------------------------------------- settings
@@ -109,7 +112,7 @@ BLUE = (80, 150, 255)
 LEVELS = [
     {
         "name": "Stage 1: The chaser",
-        "hint": "Climb up, grab the key, then unlock the door on the right.",
+        "hint": "Grab the key(don't grab two at the same time) and ESCAPE. Beware of the chaser!",
 
         "grid": [
             "####################",
@@ -120,29 +123,28 @@ LEVELS = [
             "#.........V....#..##",   
             "#..................#",  
             "##..##.###.###.#####",  
-            "#..................#",   # 【追加】チェイサー
+            "#.............C....#",   # 【追加】チェイサー
             "#..###...##..#######",  
-            "#P.......K..D.K..DE#",   
+            "#P.....G....D....DE#",   
             "####################",
             "####################",
         ],
     },
     {
-        "name": "Stage 2: Trust Nothing",
-
-        "hint": "A monster wakes up when you get close and hunts you. Keep moving, and watch the floor.",
+        "name": "Stage 2: Gravity Flip",
+        "hint": "SPACE no longer jumps... it flips gravity. Good luck.",
         "grid": [
             "####################",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#P................E#",
+            "#...F....HHHHHHD...#",
+            "#K..#..........D...#",
+            "#.G.#.....##...D...#",
+            "#####..........D...#",
+            "#..............D..E#",
+            "#..............#####",
+            "#..............D...#",
+            "#...V..........DG.X#",
+            "#.............######",
+            "#P.................#",
             "####################",
             "####################",
         ],
@@ -152,14 +154,14 @@ LEVELS = [
         "hint": "Swim up to get the key, cross the spikes carefully!",
         "grid": [
             "####################",    ### 【追加】Kは鍵、Wは水、Vは水中を上下に動く敵
-            "KP.WWWWWWWWWWWWWWWK#",    ### 水中を泳いで上部の鍵を取り、トゲを避けて出口を目指す配置 (仮)
+            "#P.WWWWWWWWWWWWWWWK#",    ### 水中を泳いで上部の鍵を取り、トゲを避けて出口を目指す配置 (仮)
             "####WWWWWWWWWWWWWWW#",
             "#WWDWWWWWWSSWWWWSWW#",
             "#WWW################",
             "#WWW##WWWWWWSWWWWWW#",
             "#WWWWWWWWWWWWWWWWWK#",
             "#WWWWWWWWWWWWWWWWWW#",
-            "#WW##WWWWW#WWW##WW##",
+            "#WW##WWWWW#WWW#FWW##",
             "#WWWWSSSSSSSSSSSSSS#",
             "#WWWWV..VVD..V..V.E#",
             "####################",
@@ -167,12 +169,12 @@ LEVELS = [
         ],
     },
     {
-        "name": "Stage 4: The Cellar",
-        "hint": "Climb up, grab the key, then unlock the door on the right.",
+        "name": "Stage 4: ICE SKATING",
+        "hint": "Ice is SLIPPERY!!",
         "grid": [
             "####################",
             "#..................#",
-            "#..................#",
+            "#....#.............#",
             "#....#.............#",
             "#....#.K...........#",
             "#....#.............#",
@@ -186,8 +188,8 @@ LEVELS = [
         ],
     },
     {
-        "name": "Stage 5: The Cellar",
-        "hint": "Climb up, grab the key, then unlock the door on the right.",
+        "name": "Stage 5: SLIME INVASION",
+        "hint": "Slime slows you down.",
         "grid": [
             "####################",
             "#P.......#...K.....#",
@@ -205,12 +207,12 @@ LEVELS = [
         ],
     },
     {
-        "name": "Stage 6: The Cellar",
-        "hint": "Climb up, grab the key, then unlock the door on the right.",
+        "name": "Stage 6: WIND UPDRAFT",
+        "hint": "Feel the wind and FLY!!",
         "grid": [
             "####################",
             "#..............X...#",
-            "#..H....K..G.......#",
+            "#..HH...K..G.......#",
             "#..####F####.......#",
             "#.......SSS....H...#",
             "#....V........H....#",
@@ -236,11 +238,20 @@ def tile_box(tx, ty):
     return (tx * TILE, ty * TILE, (tx + 1) * TILE, (ty + 1) * TILE)
 
 
-def spike_box(tx, ty):
-    """Spikes only hurt in the lower half of their tile."""
-    return (tx * TILE + 8, ty * TILE + TILE / 2,
-            (tx + 1) * TILE - 8, (ty + 1) * TILE)
-
+def spike_box(tx, ty, gravity_dir=1):
+    """
+    Spikes hurt in the half of the tile that the player is being pulled toward.
+    gravity_dir =  1 → floor spikes (lower half)
+    gravity_dir = -1 → ceiling spikes (upper half)
+    """
+    if gravity_dir > 0:
+        # normal: lower half
+        return (tx * TILE + 8, ty * TILE + TILE / 2,
+                (tx + 1) * TILE - 8, (ty + 1) * TILE)
+    else:
+        # upside-down: upper half
+        return (tx * TILE + 8, ty * TILE,
+                (tx + 1) * TILE - 8, ty * TILE + TILE / 2)
 
 class Enemy:
     def __init__(self, x, y, dx, dy, walker):
@@ -361,6 +372,7 @@ class World:
         self.jump_held = False
         self.facing = 1
 
+        self.gravity_dir = 1          # 1 = normal (down), -1 = upside down
         # game state
         self.has_key = False
         self.dead = None
@@ -436,11 +448,15 @@ class World:
     def jump_released(self):
         self.jump_held = False
 
-        if not self.in_water and self.vy < 0:  ### 【stage3】水中ではジャンプの高さ調整を行わない ###
+        # cut jump only when moving against current gravity
+        # (水中ではジャンプの高さ調整を行わない)
+        if not self.in_water and (
+                (self.vy < 0 and self.gravity_dir > 0) or
+                (self.vy > 0 and self.gravity_dir < 0)):
             self.vy *= JUMP_CUT
 
     def _do_jump(self):
-        self.vy = -JUMP_SPEED
+        self.vy = -JUMP_SPEED * self.gravity_dir
         self.on_ground = False
         self.coyote = 0.0
         self.jump_buffer = 0.0
@@ -593,8 +609,9 @@ class World:
                 if hit:
                     self.vx = 0.0
 
-            # 通常時の重力処理（1回だけ実行）
-            self.vy = min(self.vy + GRAVITY * dt, MAX_FALL)
+            # 通常時の重力処理（1回だけ実行・重力の向きに対応）
+            self.vy += GRAVITY * self.gravity_dir * dt
+            self.vy = max(-MAX_FALL, min(MAX_FALL, self.vy))
 
             # 上昇気流による上昇処理
             self._update_wind(dt)
@@ -603,7 +620,9 @@ class World:
             self.on_ground = False
 
             if self._move_axis(0, dy):
-                if dy > 0:
+                # landed on the surface we are being pulled toward
+                if (dy > 0 and self.gravity_dir > 0) or \
+                   (dy < 0 and self.gravity_dir < 0):
                     self.on_ground = True
                 self.vy = 0.0
 
@@ -635,7 +654,7 @@ class World:
             self.message = "You got the key!"
 
         for p in self.spikes | self.hidden:
-            if overlap(box, spike_box(*p)):
+            if overlap(box, spike_box(*p, self.gravity_dir)):
                 self.die("Spikes!" if p in self.spikes else
                          "Hidden spikes! Nobody warned you.")
 
@@ -731,9 +750,20 @@ class Game:
                 elif p in w.spikes or (revealed and p in w.hidden):
                     for i in range(3):
                         bx = rect.left + 4 + i * 11
-                        pygame.draw.polygon(self.screen, (200, 200, 210), [
-                            (bx, rect.bottom - 1), (bx + 6, rect.centery),
-                            (bx + 12, rect.bottom - 1)])
+                        if w.gravity_dir > 0:
+                            # normal floor spikes (pointing up)
+                            pygame.draw.polygon(self.screen, (200, 200, 210), [
+                                (bx, rect.bottom - 1),
+                                (bx + 6, rect.centery),
+                                (bx + 12, rect.bottom - 1)
+                            ])
+                        else:
+                            # ceiling spikes (pointing down)
+                            pygame.draw.polygon(self.screen, (200, 200, 210), [
+                                (bx, rect.top + 1),
+                                (bx + 6, rect.centery),
+                                (bx + 12, rect.top + 1)
+                            ])
 
         water_surface = pygame.Surface((TILE, TILE), pygame.SRCALPHA)  ### 【stage3：水の描画】半透明の青いタイル画像を作る
         water_surface.fill((30, 140, 220, 110))
@@ -790,13 +820,22 @@ class Game:
         l, t, r, b = self.world.player_box()
         body = pygame.Rect(int(ox + l), int(oy + t), PLAYER_SIZE, PLAYER_SIZE)
         pygame.draw.rect(self.screen, BLUE, body, border_radius=5)
+
+        # eyes (flip when gravity is inverted)
+        if self.world.gravity_dir > 0:
+            eye_y = body.y + 9
+        else:
+            eye_y = body.bottom - 9
+
         eye = 14 if self.world.facing > 0 else 4
 
         for s in (eye, eye + 6):
-            pygame.draw.circle(self.screen, WHITE, (body.x + s, body.y + 9), 3)
+            pygame.draw.circle(self.screen, WHITE, (body.x + s, eye_y), 3)
 
         if self.world.has_key:
-            pygame.draw.circle(self.screen, GOLD, (body.right, body.top), 5)
+            key_pos = (body.right, body.top) if self.world.gravity_dir > 0 \
+                      else (body.right, body.bottom)
+            pygame.draw.circle(self.screen, GOLD, key_pos, 5)
 
         if self.world.in_water:  ### 【stage3】プレイヤーが水中にいる間、画面全体に薄い青色のフィルターを重ねる
             filter_surf = pygame.Surface((SCREEN_W, ROWS * TILE), pygame.SRCALPHA)
@@ -805,14 +844,15 @@ class Game:
 
     def draw_hud(self):
         self.screen.blit(self.title.render(self.level["name"], True, GOLD), (12, 8))
+        grav = "DOWN" if self.world.gravity_dir > 0 else "UP"
         info = (f"Deaths: {self.deaths}   Time: {int(self.total_time)}s   "
-                f"Key: {'YES' if self.world.has_key else 'no'}")
+                f"Key: {'YES' if self.world.has_key else 'no'}   Gravity: {grav}")
         self.screen.blit(self.font.render(info, True, WHITE), (12, 36))
         y = HUD_H + ROWS * TILE + 6
         msg = self.world.dead or self.world.message
         col = RED if self.world.dead else GREEN
         self.screen.blit(self.font.render(msg, True, col), (12, y))
-        keys = "ARROWS move | SPACE jump (hold = higher, again in air = double) | R restart"
+        keys = "ARROWS move | SPACE jump/flip | R restart"
         self.screen.blit(self.small.render(keys, True, (140, 140, 170)), (12, y + 20))
 
     def draw_overlay(self, text, color, sub):
@@ -825,7 +865,54 @@ class Game:
         s = self.font.render(sub, True, WHITE)
         self.screen.blit(s, s.get_rect(center=(SCREEN_W // 2, cy + 30)))
 
+    def is_game_clear(self):
+        """
+        最終ステージをクリアしたか
+        """
+        return self.world.cleared and self.level_idx == len(LEVELS) - 1
+
+    def draw_game_clear(self):
+        """全ステージクリア後のエンディング画面"""
+        self.screen.fill(BG)
+        t = pygame.time.get_ticks() / 1000.0
+
+        # 背景の星(ゆっくり点滅)
+        for i in range(40):
+            sx = (i * 97) % SCREEN_W
+            sy = (i * 53) % SCREEN_H
+            if int(t * 2 + i) % 3 == 0:
+                pygame.draw.circle(self.screen, GOLD, (sx, sy), 2)
+            else:
+                pygame.draw.circle(self.screen, (90, 90, 130), (sx, sy), 1)
+
+        # 金色の枠
+        pygame.draw.rect(self.screen, GOLD,
+                         (20, 20, SCREEN_W - 40, SCREEN_H - 40), 3, border_radius=12)
+
+        cx = SCREEN_W // 2
+        img = self.big.render("GAME CLEAR!", True, GOLD)
+        self.screen.blit(img, img.get_rect(center=(cx, 170)))
+
+        sub = self.title.render("You escaped the dungeon!", True, GREEN)
+        self.screen.blit(sub, sub.get_rect(center=(cx, 250)))
+
+        minutes, seconds = divmod(int(self.total_time), 60)
+        for i, line in enumerate((f"Deaths : {self.deaths}",
+                                  f"Time   : {minutes}:{seconds:02d}")):
+            txt = self.font.render(line, True, WHITE)
+            self.screen.blit(txt, txt.get_rect(center=(cx, 330 + i * 32)))
+
+        # 点滅するメッセージ
+        if int(t * 2) % 2 == 0:
+            prompt = self.font.render("Press ENTER to exit", True, (140, 140, 170))
+            self.screen.blit(prompt, prompt.get_rect(center=(cx, SCREEN_H - 90)))
+
     def draw(self):
+        if self.is_game_clear():          # 最終ステージクリア → エンディング画面
+            self.draw_game_clear()
+            pygame.display.flip()
+            return
+        
         self.screen.fill(BG)
         self.draw_world()
         self.draw_hud()
@@ -852,12 +939,24 @@ class Game:
             pygame.quit()
             sys.exit()
 
-        elif key == pygame.K_r:
+        # 最終ステージクリア後は ENTER でゲーム終了(他のキーは無効)
+        if self.is_game_clear():
+            if key == pygame.K_RETURN:
+                pygame.quit()
+                sys.exit()
+            return
+        
+        if key == pygame.K_r:
             self.restart()
 
         elif key in self.JUMP_KEYS:
-            self.world.jump_pressed()
-
+            # Stage 2 (index 1): SPACE flips gravity instead of jumping
+            if self.level_idx == 1:
+                self.world.gravity_dir *= -1
+                self.world.message = "Gravity flipped!"
+                self.world.jump_buffer = 0.0   # cancel any buffered jump
+            else:
+                self.world.jump_pressed()
         elif key == pygame.K_RETURN and self.world.cleared:
             if self.level_idx + 1 < len(LEVELS):
                 self.load(self.level_idx + 1)
