@@ -194,20 +194,20 @@ LEVELS = [
         "hint": "Climb up, grab the key, then unlock the door on the right.",
         "grid": [
             "####################",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#..................#",
-            "#P................E#",
+            "#..............X...#",
+            "#..H....K..G.......#",
+            "#..####F####.......#",
+            "#.......SSS....H...#",
+            "#....V........H....#",
+            "#.####S....####...S#",
+            "#......^......V....#",
+            "#..S...^SS..V......#",
+            "#.####^####^..^.#####",
+            "#P...S^G...^SG.D..E#",
             "####################",
             "####################",
         ],
-    },
+    }
 ]
 
 
@@ -289,6 +289,7 @@ class World:
         self.fake_exits = set()
         self.exit = None
         self.enemies = []
+        self.wind_zones = set()  # stage6：上昇気流
         self.px = self.py = TILE * 1.5
         for y, row in enumerate(grid):
             for x, ch in enumerate(row):
@@ -320,6 +321,8 @@ class World:
                 elif ch == "P":
                     self.px = cx
                     self.py = (y + 1) * TILE - PLAYER_SIZE / 2
+                elif ch == "^":  # stage6：上昇気流
+                    self.wind_zones.add(p)
         # physics state
         self.vy = 0.0
         self.on_ground = False
@@ -402,6 +405,26 @@ class World:
                 x, y = t
                 stack += [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
 
+    def _update_wind(self, dt: int):  # stage6：上昇気流
+        """
+        引数：経過時間
+        プレイヤーが範囲内にいたら浮かせる関数
+        """
+        if not self.wind_zones:  # 上昇気流が存在するかの確認
+            return
+
+        player_box = self.player_box()  # プレイヤーの当たり判定取得:(left, top, right, bottom)を格納
+        WIND_FORCE = 2400.0
+        MAX_WIND_SPEED = -450.0
+            
+        for tx, ty in self.wind_zones:
+            if overlap(player_box, tile_box(tx, ty)):  # 上昇気流による上昇
+                self.vy -= WIND_FORCE * dt  # プレイヤーを上昇させる
+                self.vy = max(self.vy, MAX_WIND_SPEED)
+                self.air_jumps = MAX_AIR_JUMPS  # 空中ジャンプの回復
+                break
+
+
     def update(self, dt, dirx):
         if self.dead or self.cleared:
             return
@@ -424,6 +447,7 @@ class World:
             self.facing = dirx
             self._move_axis(dirx * MOVE_SPEED * dt, 0)
         self.vy = min(self.vy + GRAVITY * dt, MAX_FALL)
+        self._update_wind(dt)  # stage6：重力計算に風を適用する
         dy = self.vy * dt
         self.on_ground = False
         if self._move_axis(0, dy):
@@ -530,10 +554,33 @@ class Game:
                             (bx, rect.bottom - 1), (bx + 6, rect.centery),
                             (bx + 12, rect.bottom - 1)])
 
+    def _draw_wind_zones(self, ox: int, oy: int):  #stage6
+        """
+        引数ox：画面横方向の描画位置のずれ
+        引数oy：画面縦方向の描画位置のずれ
+        上昇気流の範囲を表す
+        """
+        if not self.world.wind_zones:  # 上昇気流が存在するかの確認
+            return
+
+        t = pygame.time.get_ticks() / 1000.0  # 現在の時間を取得
+        for x, y in self.world.wind_zones:  # 上昇気流の座標を取得
+            rect = pygame.Rect(ox + x * TILE, oy + y * TILE, TILE, TILE)  # 描画画面を作成
+            wind_bg = pygame.Surface((TILE, TILE), pygame.SRCALPHA)  # 背景色
+            wind_bg.fill((80, 200, 240, 40))
+            self.screen.blit(wind_bg, rect.topleft)  # 上昇気流の背景
+            offset_y = (t * 80) % TILE  # 上に流れる風の矢印
+            arrow_y = rect.bottom - offset_y
+            if rect.top <= arrow_y <= rect.bottom:
+                cx = rect.centerx
+                pts = [(cx - 6, arrow_y + 4), (cx, arrow_y - 4), (cx + 6, arrow_y + 4)]
+                pygame.draw.lines(self.screen, (180, 240, 255), False, pts, 2)  # 矢印の描画
+
     def draw_world(self):
         ox = int((self.shake % 4 - 2) * 2) if self.shake else 0
         oy = HUD_H
         self.draw_tiles(ox, oy)
+        self._draw_wind_zones(ox, oy)  # stage6：風のエフェクトを表示
         for mx, my in self.markers[self.level_idx]:
             t = self.font.render("x", True, (170, 50, 50))
             self.screen.blit(t, t.get_rect(center=(ox + mx, oy + my)))
